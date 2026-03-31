@@ -1,0 +1,58 @@
+services:
+  asterisk:
+    image: andrius/asterisk:latest
+    container_name: vivint-asterisk
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/asterisk-src/docker-entrypoint.sh"]
+    volumes:
+      - ./asterisk/etc/asterisk:/etc/asterisk-src:ro   # config templates
+      - ./asterisk/agi-bin:/etc/asterisk-agi:ro         # AGI scripts
+      - asterisk-cfg:/etc/asterisk                      # envsubst output
+    ports:
+      - "5061:5061"                        # WSS SIP
+      - "10000-10100:10000-10100/udp"      # RTP media
+    environment:
+      - SIP_WSS_URL=${SIP_WSS_URL}
+      - SIP_SERVER=${SIP_SERVER}
+      - SIP_USERNAME=${SIP_USERNAME}
+      - SIP_PASSWORD=${SIP_PASSWORD}
+      - SIP_DOORBELL_USERNAME=${SIP_DOORBELL_USERNAME}
+      - SIP_DOORBELL_DOMAIN=${SIP_DOORBELL_DOMAIN}
+      - HA_BASE_URL=${HA_BASE_URL}
+      - HA_TOKEN=${HA_TOKEN}
+      - HA_WEBHOOK_ID=${HA_WEBHOOK_ID}
+    networks:
+      - vivint-bridge
+
+  go2rtc:
+    image: alexxit/go2rtc
+    container_name: vivint-go2rtc
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+    ports:
+      - "${GO2RTC_PORT:-1984}:1984"   # API / WebRTC / HLS
+      - "${RTSP_PORT:-8554}:8554"     # RTSP
+      - "5004:5004/udp"               # RTP audio in from Asterisk
+      - "5005:5005/udp"               # RTP backchannel out to Asterisk
+    networks:
+      - vivint-bridge
+
+  onvif:
+    build:
+      context: ./onvif
+    container_name: vivint-onvif
+    restart: unless-stopped
+    # host networking required for WS-Discovery UDP multicast to reach the LAN
+    network_mode: host
+    env_file:
+      - .env
+    depends_on:
+      - go2rtc
+
+networks:
+  vivint-bridge:
+    driver: bridge
+
+volumes:
+  asterisk-cfg:

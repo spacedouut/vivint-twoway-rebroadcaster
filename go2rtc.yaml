@@ -1,0 +1,21 @@
+api:
+  listen: :1984
+
+rtsp:
+  listen: :8554
+
+# go2rtc reads environment variables in source URLs using ${VAR} syntax.
+# Set these via docker-compose env or a .env file.
+streams:
+  # Main stream: MJPEG video from HA proxy + G.711 audio from Asterisk RTP
+  vivint_front:
+    - >-
+      ffmpeg:${HA_BASE_URL}/api/camera_proxy_stream/${HA_CAMERA_ENTITY}
+      ?token=${HA_TOKEN}
+      #video=h264#audio=pcmu#input_args=-re -headers "Authorization: Bearer ${HA_TOKEN}"
+    - rtp://0.0.0.0:5004
+
+  # Backchannel (talk): audio from RTSP viewers → forwarded to Asterisk
+  # Asterisk AGI polls port 5005 to pick up talk audio and send to doorbell SIP leg
+  vivint_front_talk:
+    - rtp://0.0.0.0:5005

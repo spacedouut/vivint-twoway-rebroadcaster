@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Minimal WSDL-like stub returned on GET /onvif/device_service.
+  Full WSDL is not required — most ONVIF clients just POST SOAP actions.
+-->
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+             xmlns:tds="http://www.onvif.org/ver10/device/wsdl"
+             name="DeviceService"
+             targetNamespace="http://www.onvif.org/ver10/device/wsdl">
+  <service name="DeviceService">
+    <port name="DevicePort" binding="tds:DeviceBinding">
+      <soap:address location="http://{host}:{port}/onvif/device_service"/>
+    </port>
+  </service>
+</definitions>

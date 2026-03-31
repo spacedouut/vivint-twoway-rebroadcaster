@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""
+Asterisk EAGI script: bridges audio between the active SIP call and go2rtc
+RTP ports, enabling two-way audio via the ONVIF/RTSP stream.
+
+In EAGI mode:
+  - fd 0 (stdin)  — AGI command channel (text)
+  - fd 1 (stdout) — AGI response channel (text)
+  - fd 2 (stderr) — logging
+  - fd 3           — raw audio pipe from/to Asterisk (signed 16-bit LE, 8 kHz)
+
+Audio flow:
+  Doorbell SIP audio  →  fd3 read  →  RTP encode  →  go2rtc:GO2RTC_RTP_IN_PORT
+  go2rtc:GO2RTC_RTP_OUT_PORT  →  RTP decode  →  fd3 write  →  Doorbell SIP
+
+Environment variables (set by docker-compose, substituted by entrypoint):
+  GO2RTC_HOST         hostname of go2rtc container (default: go2rtc)
+  GO2RTC_RTP_IN_PORT  port go2rtc listens on for incoming audio (default: 5004)
+  GO2RTC_RTP_OUT_PORT port go2rtc uses for outgoing backchannel (default: 5005)
+"""
+import sys
+import os
+import socket
+import struct
+import threading
+import audioop
+import time
+
+GO2RTC_HOST = os.environ.get("GO2RTC_HOST", "go2rtc")
+GO2RTC_RTP_IN_PORT = int(os.environ.get("GO2RTC_RTP_IN_PORT", "5004"))
+GO2RTC_RTP_OUT_PORT = int(os.environ.get("GO2RTC_RTP_OUT_PORT", "5005"))
+
+# EAGI delivers signed 16-bit LE at 8000 Hz, 20ms frames = 320 bytes
+FRAME_BYTES = 320
+# RTP PCMU payload type
+PT_PCMU = 0
+
+_stop = threading.Event()
+
+
+def read_agi_headers():
+    headers = {}
+    while True:
+        line = sys.stdin.readline()
+        if not line or line == "\n":
+            break
+        if ":" in line:
+            k, _, v = line.partition(":")
+            headers[k.strip()] = v.strip()
+    return headers
+
+
+def send_agi(cmd: str) -> str:
+    sys.stdout.write(cmd + "\n")
+    sys.stdout.flush()
+    return sys.stdin.readline().strip()
+
+
+def build_rtp_header(seq: int, ts: int, ssrc: int, pt: int = PT_PCMU) -> bytes:
+    return struct.pack("!BBHII", 0x80, pt, seq & 0xFFFF, ts & 0xFFFFFFFF, ssrc)
+
+
+def slin_to_ulaw(slin_bytes: bytes) -> bytes:
+    """Convert signed 16-bit linear PCM to G.711 µ-law."""
+    return audioop.ulaw2lin(audioop.lin2ulaw(slin_bytes, 2), 2)
+
+
+# audioop.lin2ulaw returns bytes, ulaw2lin is the reverse — we only need lin2ulaw
+def encode_ulaw(slin_bytes: bytes) -> bytes:
+    return audioop.lin2ulaw(slin_bytes, 2)
+
+
+def decode_ulaw(ulaw_bytes: bytes) -> bytes:
+    return audioop.ulaw2lin(ulaw_bytes, 2)
+
+
+def forward_to_go2rtc(audio_rfd: int, sock_out: socket.socket):
+    """Read SLIN from EAGI fd3, encode to PCMU, send RTP to go2rtc."""
+    seq = 0
+    ts = 0
+    ssrc = int.from_bytes(os.urandom(4), "big")
+    audio_pipe = os.fdopen(audio_rfd, "rb", buffering=0)
+    try:
+        while not _stop.is_set():
+            chunk = audio_pipe.read(FRAME_BYTES)
+            if not chunk:
+                break
+            payload = encode_ulaw(chunk)
+            header = build_rtp_header(seq, ts, ssrc)
+            sock_out.sendto(header + payload, (GO2RTC_HOST, GO2RTC_RTP_IN_PORT))
+            seq += 1
+            ts += FRAME_BYTES // 2  # 160 samples per 20ms frame at 8kHz
+    except Exception as exc:
+        sys.stderr.write(f"bridge_rtp: forward_to_go2rtc error: {exc}\n")
+    finally:
+        _stop.set()
+
+
+def forward_from_go2rtc(audio_wfd: int, sock_in: socket.socket):
+    """Receive RTP from go2rtc, decode PCMU, write SLIN to EAGI fd3."""
+    sock_in.settimeout(0.1)
+    try:
+        while not _stop.is_set():
+            try:
+                data, _ = sock_in.recvfrom(512)
+            except socket.timeout:
+                continue
+            # Minimum valid RTP packet: 12-byte header + payload
+            if len(data) <= 12:
+                continue
+            payload = data[12:]  # strip RTP header
+            slin = decode_ulaw(payload)
+            try:
+                os.write(audio_wfd, slin)
+            except OSError:
+                break
+    except Exception as exc:
+        sys.stderr.write(f"bridge_rtp: forward_from_go2rtc error: {exc}\n")
+    finally:
+        _stop.set()
+
+
+def main():
+    read_agi_headers()
+
+    # EAGI audio pipe is on fd 3 (read) and fd 3 is also writable for output
+    # Asterisk opens fd3 for both directions in EAGI mode.
+    audio_fd = 3
+
+    # Socket to send audio to go2rtc
+    sock_out = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    # Socket to receive backchannel audio from go2rtc
+    sock_in = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock_in.bind(("0.0.0.0", GO2RTC_RTP_OUT_PORT + 1))  # ephemeral local port
+
+    t1 = threading.Thread(
+        target=forward_to_go2rtc, args=(audio_fd, sock_out), daemon=True
+    )
+    t2 = threading.Thread(
+        target=forward_from_go2rtc, args=(audio_fd, sock_in), daemon=True
+    )
+    t1.start()
+    t2.start()
+
+    # Keep the AGI session alive until the call ends (pipe closes) or stop is set
+    t1.join()
+    _stop.set()
+    t2.join()
+
+    sock_out.close()
+    sock_in.close()
+
+
+if __name__ == "__main__":
+    main()

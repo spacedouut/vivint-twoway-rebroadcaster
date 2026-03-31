@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GetProfilesResponse — Profile T minimum compliance.
+  Single profile: H.264 video + G.711 (µ-law) audio + audio output for backchannel.
+-->
+<SOAP-ENV:Envelope
+  xmlns:SOAP-ENV="http://www.w3.org/2003/05/soap-envelope"
+  xmlns:trt="http://www.onvif.org/ver10/media/wsdl"
+  xmlns:tt="http://www.onvif.org/ver10/schema">
+  <SOAP-ENV:Body>
+    <trt:GetProfilesResponse>
+      <trt:Profiles token="MainStream" fixed="true">
+        <tt:Name>{device_name}</tt:Name>
+
+        <!-- Video source -->
+        <tt:VideoSourceConfiguration token="VideoSource_1">
+          <tt:Name>VideoSource</tt:Name>
+          <tt:UseCount>1</tt:UseCount>
+          <tt:SourceToken>VideoSource_1</tt:SourceToken>
+          <tt:Bounds x="0" y="0" width="{width}" height="{height}"/>
+        </tt:VideoSourceConfiguration>
+
+        <!-- Video encoder: H.264 -->
+        <tt:VideoEncoderConfiguration token="VideoEncoder_1">
+          <tt:Name>H264</tt:Name>
+          <tt:UseCount>1</tt:UseCount>
+          <tt:Encoding>H264</tt:Encoding>
+          <tt:Resolution>
+            <tt:Width>{width}</tt:Width>
+            <tt:Height>{height}</tt:Height>
+          </tt:Resolution>
+          <tt:Quality>5</tt:Quality>
+          <tt:RateControl>
+            <tt:FrameRateLimit>15</tt:FrameRateLimit>
+            <tt:EncodingInterval>1</tt:EncodingInterval>
+            <tt:BitrateLimit>1024</tt:BitrateLimit>
+          </tt:RateControl>
+          <tt:H264>
+            <tt:GovLength>30</tt:GovLength>
+            <tt:H264Profile>Baseline</tt:H264Profile>
+          </tt:H264>
+          <tt:SessionTimeout>PT60S</tt:SessionTimeout>
+        </tt:VideoEncoderConfiguration>
+
+        <!-- Audio source -->
+        <tt:AudioSourceConfiguration token="AudioSource_1">
+          <tt:Name>AudioSource</tt:Name>
+          <tt:UseCount>1</tt:UseCount>
+          <tt:SourceToken>AudioSource_1</tt:SourceToken>
+        </tt:AudioSourceConfiguration>
+
+        <!-- Audio encoder: G.711 µ-law (PCMU) -->
+        <tt:AudioEncoderConfiguration token="AudioEncoder_1">
+          <tt:Name>G711</tt:Name>
+          <tt:UseCount>1</tt:UseCount>
+          <tt:Encoding>G711</tt:Encoding>
+          <tt:Bitrate>64</tt:Bitrate>
+          <tt:SampleRate>8</tt:SampleRate>
+          <tt:SessionTimeout>PT60S</tt:SessionTimeout>
+        </tt:AudioEncoderConfiguration>
+
+        <!-- Audio output configuration for two-way / backchannel -->
+        <tt:AudioOutputConfiguration token="AudioOutput_1">
+          <tt:Name>Speaker</tt:Name>
+          <tt:UseCount>1</tt:UseCount>
+          <tt:OutputToken>AudioOutput_1</tt:OutputToken>
+          <tt:SendPrimacy>www.onvif.org/ver20/HalfDuplex/Server</tt:SendPrimacy>
+          <tt:OutputLevel>50</tt:OutputLevel>
+        </tt:AudioOutputConfiguration>
+
+        <!-- Audio decoder for backchannel -->
+        <tt:AudioDecoderConfiguration token="AudioDecoder_1">
+          <tt:Name>BackchannelDecoder</tt:Name>
+          <tt:UseCount>1</tt:UseCount>
+        </tt:AudioDecoderConfiguration>
+      </trt:Profiles>
+    </trt:GetProfilesResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>
